@@ -247,7 +247,9 @@ if (($generate == false) && ($retrieve_status["status"] == "1"))
         }
     }
 
-	record_log("note", "(" . $account . ") ERROR: " . $backup_accounts["response"], true);
+	if ($backup_accounts["error"] != "0") {
+		record_log("note", "(" . $account . ") ERROR: " . $backup_accounts["response"], true);
+	}
 }
 
 // Generate Variable Not Set, Backup Already Started, All Accounts Backed Up, Send Log File in Email.

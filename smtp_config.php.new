@@ -1,0 +1,29 @@
+<?php
+/**
+ * SMTP submission settings used by email_log() when PHP mail() is unavailable
+ * (for example on accounts confined to a CageFS jail).
+ *
+ * Copy this file to smtp_config.php, fill in the values, then:
+ *     chmod 600 smtp_config.php
+ *
+ * smtp_config.php must never be committed to version control.
+ */
+$smtp_config = array(
+    // Submission host and port. 587 is conventional for STARTTLS.
+    'host' => 'smtp.example.com',
+    'port' => 587,
+
+    // 'tls' performs STARTTLS before authenticating. Use '' to disable.
+    'secure' => 'tls',
+
+    // Mailbox used for authentication and as the envelope sender.
+    'username' => 'backup-notifications@example.com',
+    'password' => 'CHANGE-ME',
+
+    // Address placed in the From: header.
+    'from' => 'backup-notifications@example.com',
+    'from_name' => 'WHM Backup Solutions',
+
+    // Name announced in EHLO. Optional; defaults to localhost.
+    'ehlo_host' => 'localhost',
+);

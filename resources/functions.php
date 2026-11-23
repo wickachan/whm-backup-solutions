@@ -730,6 +730,71 @@ function backup_accounts($account_list)
 }
 
 /**
+ * Minimal SMTP submission client (STARTTLS + AUTH LOGIN).
+ * Used instead of PHP mail(), which cannot work in this CageFS jail because the
+ * sendmail wrapper cannot read /etc/domainusers. Credentials live in
+ * smtp_config.php (mode 600) and are never stored in this file.
+ */
+function smtp_send($to, $subject, $body, $c)
+{
+    // Optional settings may be absent from smtp_config.php.
+    $c += array("secure" => "", "ehlo_host" => "localhost", "from_name" => $c["from"]);
+
+    $err = function ($m) { return array("error" => "1", "response" => "SMTP Error: " . $m); };
+
+    $fp = @stream_socket_client("tcp://" . $c['host'] . ":" . $c['port'], $en, $es, 15);
+    if (!$fp)
+        return $err("Unable To Connect To " . $c['host'] . ":" . $c['port'] . " (" . $es . ").");
+    stream_set_timeout($fp, 20);
+
+    $read = function ($expect) use ($fp) {
+        $out = "";
+        while (($l = fgets($fp, 1024)) !== false) {
+            $out .= $l;
+            if (!isset($l[3]) || $l[3] === " ") break;
+        }
+        $code = (int) substr(ltrim($out), 0, 3);
+        return ($code === $expect) ? array(true, $out) : array(false, "expected " . $expect . ", got: " . trim($out));
+    };
+    $wr = function ($s) use ($fp) { fwrite($fp, $s . "\r\n"); };
+
+    $r = $read(220);                                  if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    $wr("EHLO " . $c["ehlo_host"]);  $r = $read(250); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+
+    if ($c["secure"] === "tls") {
+        $wr("STARTTLS"); $r = $read(220); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+        if (@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) !== true) {
+            fclose($fp); return $err("TLS negotiation failed.");
+        }
+        $wr("EHLO " . $c["ehlo_host"]); $r = $read(250); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    }
+
+    $wr("AUTH LOGIN");                            $r = $read(334); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    $wr(base64_encode($c['username']));           $r = $read(334); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    $wr(base64_encode($c['password']));           $r = $read(235); if (!$r[0]) { fclose($fp); return $err("authentication rejected (" . $r[1] . ")."); }
+
+    $wr("MAIL FROM:<" . $c['from'] . ">");        $r = $read(250); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    $wr("RCPT TO:<" . $to . ">");                 $r = $read(250); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+    $wr("DATA");                                  $r = $read(354); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+
+    $hdrs = "From: " . $c["from_name"] . " <" . $c['from'] . ">\r\n"
+          . "To: <" . $to . ">\r\n"
+          . "Subject: " . $subject . "\r\n"
+          . "Date: " . date("r") . "\r\n"
+          . "MIME-Version: 1.0\r\n"
+          . "Content-Type: text/plain; charset=UTF-8\r\n"
+          . "X-Mailer: WHM Backup Solutions (SMTP)\r\n";
+    $data = $hdrs . "\r\n" . str_replace("\n", "\r\n", str_replace("\r\n", "\n", $body));
+    foreach (explode("\r\n", $data) as $line) {           // dot-stuffing, RFC 5321
+        if (isset($line[0]) && $line[0] === ".") $line = "." . $line;
+        $wr($line);
+    }
+    $wr(".");                                     $r = $read(250); if (!$r[0]) { fclose($fp); return $err($r[1]); }
+
+    $wr("QUIT"); @fclose($fp);
+    return array("error" => "0", "response" => "");
+}
+/**
  * @name        email_log
  * @description Sends the specified log file to the email address.
  * @global      $log_file       (string)   Filename of log.
@@ -766,7 +831,19 @@ function email_log($subject, $message, $system_log = FALSE)
 
 	$message = $message . $contents . "\n\nPlease note the 'Backup Initiated' status, only indicates that the cPanel server has responded with a positive confirmation of receiving the API request. The API request will add the account backup to a queue on the cPanel server. The actual backup starting time will vary based on the server configuration."; // Stop lines being longer than 70 characters.
 
-    $mail = mail($config["backup_email"], $subject, $message, "From: " . $config["backup_email"] . "\r\n");
+        $conf_file = $directory . "smtp_config.php";
+    if (is_file($conf_file)) {
+        $smtp_config = null;
+        include $conf_file;
+        if (!is_array($smtp_config))
+            return array("error" => "1", "response" => "Unable To Send Notification Email, SMTP Configuration Invalid.");
+        $res = smtp_send($config["backup_email"], $subject, $message, $smtp_config);
+        if ($res["error"] != "0")
+            return array("error" => "1", "response" => "Unable To Send Notification Email, " . $res["response"]);
+        return array("error" => "0", "response" => "");
+    }
+
+$mail = mail($config["backup_email"], $subject, $message, "From: " . $config["backup_email"] . "\r\n");
 	if (!$mail)
 		return array("error" => "1", "response" =>
 				"Unable To Send Notification Email, An Error Occured While Trying To Send The Email Using PHP Internal Mail Function.");

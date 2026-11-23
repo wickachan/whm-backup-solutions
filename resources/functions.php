@@ -700,20 +700,32 @@ function backup_accounts($account_list)
         return array("error" => "1", "response" => "Unable To Determinate Backup Version.");
     }
     
-    // UAPI Version
-    if (isset($result["result"]["errors"][0]))
-		return array("error" => "1", "response" => $result["result"]["errors"][0]);
-    if (isset($result["result"]["warnings"][0]))
-		return array("error" => "1", "response" => $result["result"]["warnings"][0]);
-    return array("error" => "0", "response" => "UAPI Backup Success", "pid" => $result["result"]["data"]["pid"]);
-    
-    // cPanel Version 1
+    // UAPI Version - only when the UAPI path was actually taken (its payload has a top-level "result").
+    if ((isset($result["result"])) && (is_array($result["result"])))
+    {
+        if (isset($result["result"]["errors"][0]))
+            return array("error" => "1", "response" => $result["result"]["errors"][0]);
+        if (isset($result["result"]["warnings"][0]))
+            return array("error" => "1", "response" => $result["result"]["warnings"][0]);
+        if (isset($result["result"]["data"]["pid"]))
+            return array("error" => "0", "response" => "UAPI Backup Success", "pid" => $result["result"]["data"]["pid"]);
+        return array("error" => "1", "response" => "Backup Not Initiated: UAPI returned no backup process ID (status " . (isset($result["result"]["status"]) ? $result["result"]["status"] : "unknown") . ").");
+    }
+
+    // cPanel Version 1 (legacy API1 path - reachable now that the UAPI block is conditional)
 	if (isset($result["cpanelresult"]["data"]["reason"]))
 		return array("error" => "1", "response" => $result["cpanelresult"]["data"]["reason"]);
 	if ((isset($result["cpanelresult"]["event"]["reason"])) && (!empty($result["cpanelresult"]["event"]["reason"])))
 		return array("error" => "1", "response" => $result["cpanelresult"]["event"]["reason"]);
-	if ($result["data"]["result"] == "0")
+	if ((isset($result["data"]["result"])) && ($result["data"]["result"] == "0"))
 		return array("error" => "1", "response" => $result["data"]["reason"]);
+    // A successful legacy fullbackup returns a Perl handle marker ("HASH(...)"). Anything else is
+    // an error message (commonly an HTML banner), so report it instead of claiming success.
+    if ((isset($result["data"]["result"])) && (!preg_match('/^HASH\(/', trim((string) $result["data"]["result"]))))
+    {
+        $bkp_msg = trim(preg_replace('/\s+/', ' ', strip_tags((string) $result["data"]["result"])));
+        return array("error" => "1", "response" => "Backup Not Initiated: " . $bkp_msg);
+    }
 	return array("error" => "0", "response" => "API1 Backup Success");
 }
 

@@ -24,6 +24,9 @@ $smtp_config = array(
     'from' => 'backup-notifications@example.com',
     'from_name' => 'WHM Backup Solutions',
 
+    // Where cron-wrapper.php sends job output. Required only for the wrapper.
+    'to' => 'backup-notifications@example.com',
+
     // Name announced in EHLO. Optional; defaults to localhost.
     'ehlo_host' => 'localhost',
 );

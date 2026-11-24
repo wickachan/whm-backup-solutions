@@ -64,10 +64,51 @@ Occured While Trying To Send The Email Using PHP Internal Mail Function":
 Deleting smtp_config.php reverts to the original mail() behaviour.
 
 ===============================================================
+Cron Output (optional, recommended on CageFS hosts)
+===============================================================
+Cron delivers job output through the same sendmail binary, so on hosts
+where mail() fails, MAILTO silently discards everything. MAILTO cannot be
+pointed at a script - cron treats it as a single address.
+
+cron-wrapper.php runs a command, captures stdout and stderr, and mails the
+result over SMTP instead. Cron then has no output of its own to lose.
+
+Notice that each job gets a --notify policy:
+
+	php cron-wrapper.php "label" [--notify=always|on-error] -- <command>
+
+	--notify=always    mail any non-routine output (default)
+	--notify=on-error  mail only on failure or error-looking output;
+	                   use this for frequent jobs
+
+Example crontab:
+
+	MAILTO="you@example.com"
+	SHELL="/bin/bash"
+
+	18 0 * * *  /usr/local/bin/php /path/cron-wrapper.php generate \
+	    --notify=always -- /usr/local/bin/php -q /path/whmbackup.php generate
+
+	*/13 1,2,3,4 * * * /usr/local/bin/php /path/cron-wrapper.php backup-run \
+	    --notify=on-error -- /usr/local/bin/php -q /path/whmbackup.php
+
+	12 5 * * * /usr/local/bin/php /path/cron-wrapper.php ftp-retention \
+	    --notify=always -- /usr/local/bin/php -q /path/ftp_retention.php
+
+The frequent job uses on-error because it normally exits 0 with
+"No Backups Required."; without it you would get a mail every 13 minutes
+all night. Failures, stderr, and output matching ERROR:/FAILED/Unable To
+still mail. Identical output is suppressed for one hour per label.
+
+Every run is appended to logs/cron-wrapper.log regardless of mail outcome.
+If SMTP fails, the wrapper prints to stdout so MAILTO still has a chance.
+
+===============================================================
 Script Files
 ===============================================================
 	whmbackup.php
 	ftp_retention.php
+	cron-wrapper.php
 	config.php.new
 	secure-config.php.new
 	smtp_config.php.new
